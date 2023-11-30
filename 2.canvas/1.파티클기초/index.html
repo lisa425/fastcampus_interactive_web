@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
     <style>
         html, body{
             margin: 0;
@@ -12,12 +13,26 @@
             overflow: hidden;
         }
         canvas{
-            background-color: orange;
+            /* filter: blur(50px) contrast(50); */
+            /*blur와 contrast를 높여서 끈적거리는 효과 완성, 배경색의 영향 받음*/
+            filter:url('#gooey'); /*svg filter id 전달*/
+            background-color: white;
         }
     </style>
 </head>
 <body>
     <canvas></canvas>
+    <svg>
+        <defs>
+            <!-- blur, 각종 필터 처리 가능, 마스킹 영역도 정의 가능.-->
+            <!-- 재사용 가능한 필터 정의 -->
+            <filter id="gooey">
+                <!-- stdDeviation: 가로세로 블러값-->
+                <feGaussianBlur stdDeviation="10" in="SourceGraphic" result="blur1"/>
+                <feColorMatrix in="blur1" mode="matrix" value="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 -100 -23" />
+            </filter>
+        </defs>
+    </svg>
     <script type="module" src="./index.js"></script>
 </body>
 </html>
