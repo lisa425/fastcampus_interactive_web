@@ -46,7 +46,7 @@
     const ground = Bodies.rectangle(cw/2, ch, cw, 50, {isStatic: true})
     Composite.add(engine.world, [ground, mouseConstraint])
 
-    canvas.addEventListener('mousewheel', () => {
+    canvas.addEventListener('wheel', () => {
       createBox()
     })
 
