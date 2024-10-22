@@ -1,12 +1,29 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { convertLatLngToPos, getGradientCanvas } from './utils'
-
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js'
+import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 export default function () {
+  const canvasSize = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
+
   const renderer = new THREE.WebGLRenderer({
     alpha: true,
   })
   renderer.outputEncoding = THREE.sRGBEncoding
+
+  const renderTarget = new THREE.WebGLRenderTarget(canvasSize.width, canvasSize.height, {
+    samples: 2,
+  }) //안티앨리어싱
+
+  const effectComposer = new EffectComposer(renderer, renderTarget)
 
   const textureLoader = new THREE.TextureLoader()
   const cubeTextureLoader = new THREE.CubeTextureLoader()
@@ -16,11 +33,6 @@ export default function () {
   const container = document.querySelector('#container')
 
   container.appendChild(renderer.domElement)
-
-  const canvasSize = {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }
 
   const scene = new THREE.Scene()
   scene.background = environmentMap
@@ -37,6 +49,39 @@ export default function () {
     const light = new THREE.DirectionalLight(0xffffff)
     light.position.set(2.65, 2.13, 1.02)
     scene.add(light)
+  }
+
+  const addPostEffects = (obj) => {
+    const { earthGroup } = obj
+    const renderPass = new RenderPass(scene, camera) //pass = 효과같은 것. renderPass는 렌더링 기본 적용
+    effectComposer.addPass(renderPass) //effectComposer에 등록해줘야 효과 적용됨.
+
+    const flimPass = new FilmPass(1, 1, 4096, false)
+    // effectComposer.addPass(flimPass)
+
+    const unrealBloomPass = new UnrealBloomPass(new THREE.Vector2(canvasSize.width, canvasSize.height))
+    // unrealBloomPass.strength = 1
+    // unrealBloomPass.threshold = 0.1
+    // unrealBloomPass.radius = 1
+    // effectComposer.addPass(unrealBloomPass)
+
+    const shaderPass = new ShaderPass(GammaCorrectionShader)
+    // const customShaderPass = new ShaderPass({
+    //   vertexShader: `
+    //     void main(){
+    //       gl_Positon = vec4(position.x, position.y, 0.0, 1.0)
+    //     }
+    //   `,
+    //   fragmentShaver: `
+    //     void main(){
+    //       gl_FragColor = vec4(1.0, 1.0, 0.0, 1.0)
+    //     }
+    //   `,
+    // })
+    effectComposer.addPass(shaderPass) //감마쉐이더를 어느 위치에서 적용하냐에 따라 효과가 달라짐.
+    // effectComposer.addPass(customShaderPass)
+    const smaaPass = new SMAAPass()
+    effectComposer.addPass(smaaPass)
   }
 
   const createEarth1 = () => {
@@ -166,6 +211,7 @@ export default function () {
 
     renderer.setSize(canvasSize.width, canvasSize.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    effectComposer.setSize(canvasSize.width, canvasSize.height)
   }
 
   const addEvent = () => {
@@ -180,15 +226,18 @@ export default function () {
     star.rotation.y += 0.001
 
     controls.update()
-    renderer.render(scene, camera)
+    effectComposer.render()
+    // renderer.render(scene, camera)
     requestAnimationFrame(() => {
       draw(obj)
     })
   }
 
   const initialize = () => {
-    addLight()
     const obj = create()
+
+    addLight()
+    addPostEffects(obj)
     addEvent()
     resize()
     draw(obj)
