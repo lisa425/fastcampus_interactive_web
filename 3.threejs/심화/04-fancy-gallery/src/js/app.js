@@ -3,8 +3,15 @@ import vertexShader from '../shaders/vertex.glsl?raw'
 import fragmentShader from '../shaders/fragment.glsl?raw'
 import ASScroll from '@ashthornton/asscroll'
 import gsap from 'gsap'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import postVertexShader from '../shaders/postprocessing/vertex.glsl?raw'
+import postFragmentShader from '../shaders/postprocessing/fragment.glsl?raw'
+import Swup from 'swup'
+import SwupJsPlugin from '@swup/js-plugin'
 
-const asscroll = new ASScroll({
+let asscroll = new ASScroll({
   disableRaf: true,
 })
 asscroll.enable()
@@ -13,15 +20,14 @@ export default function () {
   const renderer = new THREE.WebGLRenderer({
     alpha: true,
   })
-  const container = document.querySelector('#container')
-
-  container.appendChild(renderer.domElement)
+  const composer = new EffectComposer(renderer)
 
   const canvasSize = {
     width: window.innerWidth,
     height: window.innerHeight,
   }
 
+  const raycaster = new THREE.Raycaster()
   const clock = new THREE.Clock()
   const textureLoader = new THREE.TextureLoader()
   const scene = new THREE.Scene()
@@ -30,15 +36,59 @@ export default function () {
   //html이랑 단위 맞추는 시야각 설정 공식이 잇다함...밑에꺼
   camera.fov = Math.atan(canvasSize.height / 2 / 50) * (180 / Math.PI) * 2
 
-  const imageRepository = []
+  let imageRepository = []
+  let animationId = ''
+
+  const swup = new Swup({
+    plugins: [
+      new SwupJsPlugin([
+        {
+          from: '(.*)',
+          to: '(.*)',
+          out: async (next, infos) => {
+            //기존 데이터 청소
+            asscroll.disable()
+            imageRepository.forEach(({ mesh }) => {
+              scene.remove(mesh)
+            })
+            imageRepository = []
+            window.removeEventListener('resize', resize)
+
+            await gsap.to('#swup', {
+              opacity: 0,
+              duration: 0.25,
+            })
+          },
+          in: async (next, infos) => {
+            await gsap.to('#swup', {
+              opacity: 1,
+              duration: 0.25,
+              onComplete: () => {
+                //다시 initialize
+                next()
+                window.cancelAnimationFrame(animationId)
+                asscroll = new ASScroll({
+                  disableRaf: true,
+                })
+                asscroll.enable()
+                initialize().then()
+              },
+            })
+          },
+        },
+      ]),
+    ],
+  })
 
   const loadImages = async () => {
     const images = [...document.querySelectorAll('main .content img')]
     const fetchImages = images.map(
       (image) =>
         new Promise((resolve, reject) => {
-          image.onload = resolve(image)
-          image.onerror = reject
+          const img = new Image()
+          img.src = image.src
+          img.onload = resolve(image)
+          img.onerror = reject
         })
     )
     const loadedImages = await Promise.all(fetchImages) //안의 모든 이미지들이 Resolve 됬는지 체크
@@ -56,6 +106,12 @@ export default function () {
         },
         uHover: {
           value: 0,
+        },
+        uHoverX: {
+          value: 0.5, //중앙
+        },
+        uHoverY: {
+          value: 0.5,
         },
       },
       vertexShader: vertexShader,
@@ -93,6 +149,7 @@ export default function () {
     camera.fov = Math.atan(canvasSize.height / 2 / 50) * (180 / Math.PI) * 2
     camera.updateProjectionMatrix()
 
+    composer.setSize(canvasSize.width, canvasSize.height)
     renderer.setSize(canvasSize.width, canvasSize.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   }
@@ -114,8 +171,72 @@ export default function () {
     })
   }
 
-  const addEvent = () => {
+  const addPostEffects = () => {
+    const renderPass = new RenderPass(scene, camera)
+    composer.addPass(renderPass)
+
+    const customShader = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: {
+          value: null,
+        },
+        uTime: {
+          value: 0,
+        },
+        uScrolling: {
+          value: 0,
+        },
+      },
+      vertexShader: postVertexShader,
+      fragmentShader: postFragmentShader,
+    })
+    const customPass = new ShaderPass(customShader)
+
+    composer.addPass(customPass)
+    return {
+      customShader,
+    }
+  }
+
+  const addEvent = (effects) => {
+    const { customShader } = effects
+    asscroll.on('update', ({ targetPos, currentPos }) => {
+      const speed = Math.abs(targetPos - currentPos) //scroll 동작여부, 음수일 수도 있으니까 절대값으로 변환
+      if (speed > 5) {
+        //스크롤을 했다면
+        gsap.to(customShader.uniforms.uScrolling, {
+          value: 1,
+          duration: 0.4,
+        })
+      } else {
+        gsap.to(customShader.uniforms.uScrolling, {
+          value: 0,
+          duration: 0.4,
+        })
+      }
+    })
+
+    //mousemove
+    window.addEventListener('mousemove', (e) => {
+      const pointer = {
+        x: (e.clientX / canvasSize.width) * 2 - 1,
+        y: -(e.clientY / canvasSize.height) * 2 + 1,
+      }
+      raycaster.setFromCamera(pointer, camera)
+
+      const intersects = raycaster.intersectObjects(scene.children)
+      if (intersects.length > 0) {
+        //교차하는 메시가 있다
+        let mesh = intersects[0].object
+        mesh.material.uniforms.uHoverX.value = intersects[0].uv.x - 0.5
+        mesh.material.uniforms.uHoverY.value = intersects[0].uv.y - 0.5
+      }
+    })
+
+    //resize
     window.addEventListener('resize', resize)
+
+    //hover wave
     imageRepository.forEach(({ img, mesh }) => {
       img.addEventListener('mouseenter', () => {
         gsap.to(mesh.material.uniforms.uHover, {
@@ -134,25 +255,35 @@ export default function () {
     })
   }
 
-  const draw = () => {
-    renderer.render(scene, camera)
+  const draw = (effects) => {
+    const { customShader } = effects
+
+    composer.render()
+    // renderer.render(scene, camera)
     retransform()
 
     asscroll.update()
+    customShader.uniforms.uTime.value = clock.getElapsedTime()
+
     imageRepository.forEach(({ img, mesh }) => {
       mesh.material.uniforms.uTime.value = clock.getElapsedTime()
     })
 
-    requestAnimationFrame(() => {
-      draw()
+    animationId = requestAnimationFrame(() => {
+      draw(effects)
     })
   }
 
   const initialize = async () => {
+    const container = document.querySelector('#container')
+
+    container.appendChild(renderer.domElement)
+
     await create()
-    addEvent()
+    const effects = addPostEffects()
+    addEvent(effects)
     resize()
-    draw()
+    draw(effects)
   }
 
   initialize().then()
